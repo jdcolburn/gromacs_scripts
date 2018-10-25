@@ -45,21 +45,21 @@ function intro {
 echo '' && echo 'MOLECULAR DYNAMICS' && echo ''
 
 printf ' Available proteins: | '
-cd $INITDIR && ls *.pdb | sed 's/....$//' > $INITDIR/molecules.txt              #makes "peptides.txt" which lists .pdb files in "peptides/geom/initial/"
+cd $INITDIR && ls *.pdb | sed 's/....$//' > $INITDIR/molecules.txt              #makes "molecules.txt" which lists .pdb files in "../geom/initial/"
 
-MOLS="$(< $INITDIR/molecules.txt)"										        #declares variable "PROT" for each line in "peptides.txt"
+MOLS="$(< $INITDIR/molecules.txt)"										        #declares variable "MOL" for each line in "peptides.txt"
 for MOL in $MOLS; 
 do
-	printf $MOL && printf ' | '											    	#prints each line in peptides.txt to the terminal"
+	printf $MOL && printf ' | '											    	#prints each $MOL to the terminal"
 done
 echo ''
 printf '  Available ligands: | '
-cd $LIGNDIR && ls *.gro | sed 's/....$//' > $LIGNDIR/molecules.txt              #makes "molecules.txt" which lists .pdb files in "peptides/geom/ligands/"
+cd $LIGNDIR && ls *.gro | sed 's/....$//' > $LIGNDIR/molecules.txt              #makes "molecules.txt" which lists .pdb files in "../geom/ligands/"
 
-MOLS="$(< $LIGNDIR/molecules.txt)"										        #declares variable "PROT" for each line in "peptides.txt"
+MOLS="$(< $LIGNDIR/molecules.txt)"										        #declares variable "MOL" for each line in "peptides.txt"
 for MOL in $MOLS; 
 do
-	printf $MOL && printf ' | '											    	#prints each line in peptides.txt to the terminal"
+	printf $MOL && printf ' | '											    	#prints each $MOL to the terminal"
 done
 echo '' && echo ''
 echo '  You dont need to choose a ligand if you have already performed '
@@ -195,13 +195,30 @@ cd $MAINDIR
 
 #NVT equilibration
 function nvt {
-echo ''
-echo ' > Setting up NVT...'
 mkdir -p $NVTDIR && cd $NVTDIR
 cp $EMDIR/*.itp 	$NVTDIR/
 cp $EMDIR/topol.top $NVTDIR/topol.top
+echo ''
+echo " +---------------------+"
+echo ' | > Running genrestr  |'
+echo " +---------------------+"
+#restraint generation
+$GROMDIR/make_ndx -f $EMDIR/$LIGAND.gro -o $NVTDIR/index_ligand.ndx
+$GROMDIR/genrestr -f $EMDIR/$LIGAND.gro -n $NVTDIR/index_ligand.ndx -o $NVTDIR/posre_ligand.itp -fc 1000 1000 1000
 
-$GROMDIR/grompp -f $MDPDIR/nvt.mdp -c $EMDIR/$PDB\_em.gro -p $NVTDIR/topol.top -o $NVTDIR/$PDB\_nvt.tpr
+#make edits to the topology file
+sed -i 's/; Include water topology/; Ligand position restraints\n&/'							$NVTDIR/topol.top
+sed -i "/; Ligand position restraints/a #ifdef POSRES\n#include \"posre_ligand.itp\"\n#endif\n"	$NVTDIR/topol.top
+
+#$GROMDIR/make_ndx -f $EMDIR/$PDB\_em.gro -o $NVTDIR/index_system.ndx
+
+#actual NVT step
+echo ''
+echo " +---------------------+"
+echo ' | > Setting up NVT... |'
+echo " +---------------------+"
+
+$GROMDIR/grompp -f $MDPDIR/nvt_ligand.mdp -c $EMDIR/$PDB\_em.gro -p $NVTDIR/topol.top -o $NVTDIR/$PDB\_nvt.tpr
 
 echo '#!/bin/sh'              > sub-gromacs_nvt
 echo '#$ -cwd'               >> sub-gromacs_nvt
@@ -217,12 +234,14 @@ cd $MAINDIR
 #NPT equilibration
 function npt {
 echo ''
-echo ' > Setting up NPT...'
+echo " +---------------------+"
+echo ' | > Setting up NPT... |'
+echo " +---------------------+"
 mkdir -p $NPTDIR && cd $NPTDIR
 cp $NVTDIR/*.itp 	 $NPTDIR/
 cp $NVTDIR/topol.top $NPTDIR/topol.top
 
-$GROMDIR/grompp -f $MDPDIR/npt.mdp -c $NVTDIR/$PDB\_nvt.gro -p $NPTDIR/topol.top -t $NVTDIR/$PDB\_nvt.cpt -o $NPTDIR/$PDB\_npt.tpr
+$GROMDIR/grompp -f $MDPDIR/npt_ligand.mdp -c $NVTDIR/$PDB\_nvt.gro -p $NPTDIR/topol.top -t $NVTDIR/$PDB\_nvt.cpt -o $NPTDIR/$PDB\_npt.tpr
 
 echo '#!/bin/sh'              > sub-gromacs_npt
 echo '#$ -cwd'               >> sub-gromacs_npt
@@ -238,12 +257,14 @@ cd $MAINDIR
 #production MD
 function dyn {
 echo ''
-echo ' > Setting up production MD...'
+echo " +-------------------------------+"
+echo ' | > Setting up production MD... |'
+echo " +-------------------------------+"
 mkdir -p $MDDIR && cd $MDDIR
 cp $NPTDIR/*.itp 	 $MDDIR/
 cp $NPTDIR/topol.top $MDDIR/topol.top
 
-$GROMDIR/grompp -f $MDPDIR/md.mdp -c $NPTDIR/$PDB\_npt.gro -t $NPTDIR/$PDB\_npt.cpt -p $MDDIR/topol.top -o $MDDIR/$PDB\_md.tpr
+$GROMDIR/grompp -f $MDPDIR/md_ligand.mdp -c $NPTDIR/$PDB\_npt.gro -t $NPTDIR/$PDB\_npt.cpt -p $MDDIR/topol.top -o $MDDIR/$PDB\_md.tpr
 
 echo '#!/bin/sh'              > sub-gromacs_md
 echo '#$ -cwd'               >> sub-gromacs_md
